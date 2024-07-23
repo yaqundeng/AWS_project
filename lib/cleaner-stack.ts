@@ -46,26 +46,28 @@ export class CleanerStack extends cdk.Stack {
     // const logGroup = logs.LogGroup.fromLogGroupArn(this, 'CopierLogs', props.copierLogGroupArn);
     const logGroup = logs.LogGroup.fromLogGroupName(this, 'LogGroup', '/aws/lambda/copier');
 
+    // Create a metric filter for total_temp_size
     const metricFilter = new logs.MetricFilter(this, 'MetricFilter', {
       logGroup,
       metricNamespace: 'Copier',
       metricName: 'TotalTempSize',
-      filterPattern: logs.FilterPattern.booleanValue('$.is_temporary', true),
-      metricValue: '$.size',
+      filterPattern: logs.FilterPattern.exists('$.total_temp_size'),
+      metricValue: '$.total_temp_size',
     });
 
     // Create an alarm based on the metric
     const alarm = new cloudwatch.Alarm(this, 'Alarm', {
       metric: metricFilter.metric({
-        statistic: cloudwatch.Stats.SUM,
-        period: cdk.Duration.minutes(1)
-      },),
-      threshold: 3000, // 3KB
+        statistic: 'sum',
+        period: cdk.Duration.seconds(10),
+      }),
+      threshold: 3000,
       evaluationPeriods: 1,
       alarmName: 'TemporaryObjectsSizeAlarm',
       comparisonOperator: cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
       treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
     });
+
 
     // Grant CloudWatch permission to invoke the cleaner function
     cleanerFunction.addPermission('CloudWatchInvoke', {

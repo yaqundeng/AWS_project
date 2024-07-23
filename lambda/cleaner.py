@@ -35,13 +35,5 @@ def handler(event, context):
         s3.delete_object(Bucket=bucket_name, Key=oldest_key)
         logger.info(f"Deleted oldest temporary object: {oldest_key}")
 
-        # # Reset the alarm state to OK
-        # cloudwatch_client.set_alarm_state(
-        #     AlarmName=alarm_name,
-        #     StateValue='OK',
-        #     StateReason='Cleaner lambda executed and object deleted'
-        # )
-        # logger.info(f"Alarm {alarm_name} state set to OK after cleaning.")
-
     except Exception as e:
         logger.error(f"Error processing bucket {bucket_name}: {str(e)}")

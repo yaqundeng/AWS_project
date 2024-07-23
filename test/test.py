@@ -10,7 +10,7 @@ logger = logging.getLogger()
 s3_client = boto3.client('s3')
 
 # Define the bucket name and objects to upload
-source_bucket_name = 'bucketstack-sourceadfc1803-7dmt8khaylbt'
+source_bucket_name = 'bucketstack-sourceadfc1803-qjtgwhgiaikd'
 
 objects_to_upload = [
     ('project.txt', 1024),  # 1KB
@@ -51,7 +51,7 @@ def main():
     for file_name, size in objects_to_upload:
         create_dummy_file(file_name, size)
         upload_object(file_name)
-        time.sleep(10)  
+        time.sleep(60)  
     
     # upload_object('project.txt')
     # time.sleep(5)
