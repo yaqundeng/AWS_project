@@ -4,6 +4,10 @@ import * as lambda from 'aws-cdk-lib/aws-lambda';
 import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
 import * as iam from 'aws-cdk-lib/aws-iam';
 import * as logs from 'aws-cdk-lib/aws-logs';
+import * as sns from 'aws-cdk-lib/aws-sns';
+import * as sns_subscriptions from 'aws-cdk-lib/aws-sns-subscriptions';
+import * as sqs from 'aws-cdk-lib/aws-sqs';
+import * as sqs_event_sources from 'aws-cdk-lib/aws-lambda-event-sources';
 import * as actions from 'aws-cdk-lib/aws-cloudwatch-actions';
 import { Construct } from 'constructs';
 
@@ -18,30 +22,6 @@ export class CleanerStack extends cdk.Stack {
 
     const destinationBucket = s3.Bucket.fromBucketName(this, 'DestinationBucket', props.destinationBucketName);
 
-    // Create the cleaner Lambda function
-    const bucket = s3.Bucket.fromBucketName(this, "s3bucket", "testbucket-yaqun")
-    const cleanerFunction = new lambda.Function(this, 'CleanerFunction', {
-      runtime: lambda.Runtime.PYTHON_3_12,
-      handler: 'cleaner.handler',
-      code: lambda.Code.fromBucket(bucket, "cleaner.zip"),
-      environment: {
-        DESTINATION_BUCKET: destinationBucket.bucketName
-      }
-    });
-
-    // Add permissions to the Lambda execution role using addToRolePolicy
-    cleanerFunction.addToRolePolicy(new iam.PolicyStatement({
-      actions: ['s3:*'],
-      effect: iam.Effect.ALLOW,
-      resources: [
-        `arn:aws:s3:::${props.destinationBucketName}`,
-        `arn:aws:s3:::${props.destinationBucketName}/*`
-      ]
-    }));
-
-    // Grant necessary permissions to the cleaner function
-    destinationBucket.grantReadWrite(cleanerFunction);
-
     // Create a metric filter for the copier log group
     // const logGroup = logs.LogGroup.fromLogGroupArn(this, 'CopierLogs', props.copierLogGroupArn);
     const logGroup = logs.LogGroup.fromLogGroupName(this, 'LogGroup', '/aws/lambda/copier');
@@ -54,6 +34,15 @@ export class CleanerStack extends cdk.Stack {
       filterPattern: logs.FilterPattern.exists('$.total_temp_size'),
       metricValue: '$.total_temp_size',
     });
+
+    // Create an SNS topic
+    const snsTopic = new sns.Topic(this, 'AlarmSNSTopic');
+
+    // Create an SQS queue
+    const sqsQueue = new sqs.Queue(this, 'AlarmSQSQueue');
+
+    // Subscribe the SQS queue to the SNS topic
+    snsTopic.addSubscription(new sns_subscriptions.SqsSubscription(sqsQueue));
 
     // Create an alarm based on the metric
     const alarm = new cloudwatch.Alarm(this, 'Alarm', {
@@ -68,6 +57,31 @@ export class CleanerStack extends cdk.Stack {
       treatMissingData: cloudwatch.TreatMissingData.NOT_BREACHING,
     });
 
+    // Create the cleaner Lambda function
+    const bucket = s3.Bucket.fromBucketName(this, "s3bucket", "testbucket-yaqun")
+    const cleanerFunction = new lambda.Function(this, 'CleanerFunction', {
+      runtime: lambda.Runtime.PYTHON_3_12,
+      handler: 'cleaner.handler',
+      code: lambda.Code.fromBucket(bucket, "cleaner.zip"),
+      environment: {
+        DESTINATION_BUCKET: destinationBucket.bucketName
+      }
+    });
+
+    // Add permissions to the Lambda execution role using addToRolePolicy
+    cleanerFunction.addToRolePolicy(new iam.PolicyStatement({
+      actions: ['s3:*', 'cloudwatch:SetAlarmState',
+        'cloudwatch:DescribeAlarms',],
+      effect: iam.Effect.ALLOW,
+      resources: [
+        `arn:aws:s3:::${props.destinationBucketName}`,
+        `arn:aws:s3:::${props.destinationBucketName}/*`,
+        alarm.alarmArn
+      ]
+    }));
+
+    // Grant necessary permissions to the cleaner function
+    destinationBucket.grantReadWrite(cleanerFunction);
 
     // Grant CloudWatch permission to invoke the cleaner function
     cleanerFunction.addPermission('CloudWatchInvoke', {
@@ -84,7 +98,10 @@ export class CleanerStack extends cdk.Stack {
     // }));
 
     // Set up the alarm action to trigger the cleaner function
-    alarm.addAlarmAction(new actions.LambdaAction(cleanerFunction));
+    alarm.addAlarmAction(new actions.SnsAction(snsTopic));
+
+    // Configure the cleaner Lambda function to be triggered by the SQS queue
+    cleanerFunction.addEventSource(new sqs_event_sources.SqsEventSource(sqsQueue));
   }
 
 }
